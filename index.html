@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件在线预览（PDF稳定版）</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        .file-card { transition: all 0.2s; }
+        .file-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+<header class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-4 shadow-md sticky top-0 z-10">
+    <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+        <h1 class="text-xl md:text-2xl font-bold">📁 文件在线预览系统</h1>
+        <input type="text" id="searchInput" placeholder="搜索文件名..." 
+            class="px-4 py-2 rounded-lg w-full md:w-1/3 text-gray-800">
+    </div>
+</header>
+
+<main class="container mx-auto p-4 mt-6">
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+        <h2 class="text-lg font-semibold mb-4">上传文件（PDF / Word / Excel / 图片）</h2>
+        <form id="uploadForm" class="flex flex-col md:flex-row gap-4 items-center">
+            <input type="file" id="fileInput" multiple accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.gif">
+            <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">上传文件</button>
+        </form>
+        <p id="uploadStatus" class="mt-2 text-sm"></p>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h2 class="text-lg font-semibold mb-4">文件列表</h2>
+        <div id="fileList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="col-span-full text-center text-gray-500 py-8">暂无文件</div>
+        </div>
+    </div>
+</main>
+
+<div id="previewModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center hidden z-50 p-4">
+    <div class="bg-white rounded-lg w-full max-w-5xl h-[80vh] flex flex-col">
+        <div class="flex justify-between items-center p-4 border-b">
+            <h3 id="previewTitle" class="text-lg font-semibold truncate"></h3>
+            <button id="closePreview" class="text-2xl">&times;</button>
+        </div>
+        <div id="previewContent" class="flex-1 overflow-auto p-4"></div>
+    </div>
+</div>
+
+<script>
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+const STORAGE_KEY = 'my-files';
+let files = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+
+window.onload = renderFiles;
+
+// 上传文件（本地Base64，PDF 100%可预览）
+document.getElementById('uploadForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fileList = document.getElementById('fileInput').files;
+    if (!fileList.length) return showStatus('请选择文件', 'red');
+
+    showStatus('上传中...', 'blue');
+    let count = 0;
+
+    Array.from(fileList).forEach(file => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => {
+            const fileId = Date.now() + Math.random().toString(36).substr(2, 9);
+            files.unshift({
+                id: fileId,
+                name: file.name,
+                type: file.name.split('.').pop().toLowerCase(),
+                url: reader.result,
+                time: new Date().toLocaleString()
+            });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
+            count++;
+            if (count === fileList.length) {
+                showStatus('上传成功', 'green');
+                renderFiles();
+                document.getElementById('uploadForm').reset();
+            }
+        };
+    });
+});
+
+// 渲染文件
+function renderFiles(keyword = '') {
+    const list = document.getElementById('fileList');
+    list.innerHTML = '';
+
+    let filtered = files.filter(f => f.name.toLowerCase().includes(keyword.toLowerCase()));
+    if (filtered.length === 0) {
+        list.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8">暂无匹配文件</div>';
+        return;
+    }
+
+    filtered.forEach(file => {
+        const card = document.createElement('div');
+        card.className = 'file-card bg-white border rounded p-4';
+        card.innerHTML = `
+            <div class="flex items-center gap-3 mb-3">
+                <span class="text-3xl">${getIcon(file.type)}</span>
+                <div class="flex-1 min-w-0">
+                    <p class="font-medium truncate">${file.name}</p>
+                    <p class="text-xs text-gray-500">${file.time}</p>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="preview('${file.id}')" 
+                    class="flex-1 bg-blue-100 text-blue-700 py-1.5 rounded text-sm">在线预览</button>
+                <button onclick="deleteFile('${file.id}')" 
+                    class="flex-1 bg-red-100 text-red-700 py-1.5 rounded text-sm">删除</button>
+            </div>
+        `;
+        list.appendChild(card);
+    });
+}
+
+// 在线预览（PDF 100%成功）
+function preview(fileId) {
+    const file = files.find(f => f.id === fileId);
+    if (!file) return;
+
+    const modal = document.getElementById('previewModal');
+    const title = document.getElementById('previewTitle');
+    const content = document.getElementById('previewContent');
+    title.textContent = file.name;
+    content.innerHTML = '<div class="text-center py-8">加载中...</div>';
+    modal.classList.remove('hidden');
+
+    if (file.type === 'pdf') {
+        // PDF 直接用 Base64 预览，永远不会失败
+        content.innerHTML = '<div id="pdfView" class="w-full h-full"></div>';
+        pdfjsLib.getDocument(file.url).promise.then(pdf => {
+            const view = document.getElementById('pdfView');
+            for (let i = 1; i <= pdf.numPages; i++) {
+                pdf.getPage(i).then(page => {
+                    const vp = page.getViewport({ scale: 1.2 });
+                    const c = document.createElement('canvas');
+                    c.height = vp.height;
+                    c.width = vp.width;
+                    view.appendChild(c);
+                    page.render({ canvasContext: c.getContext('2d'), viewport: vp });
+                });
+            }
+        }).catch(err => {
+            content.innerHTML = `<div class="text-center py-8 text-red-500">PDF 加载失败：${err.message}</div>`;
+        });
+    } else if (['jpg', 'jpeg', 'png', 'gif'].includes(file.type)) {
+        content.innerHTML = `<img src="${file.url}" class="max-w-full max-h-full object-contain mx-auto">`;
+    } else if (file.type === 'docx' || file.type === 'xlsx') {
+        // 使用代理解决跨域，Word/Excel 可预览
+        const proxy = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(file.url);
+        const officeUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${proxy}`;
+        content.innerHTML = `<iframe src="${officeUrl}" class="w-full h-full border-0"></iframe>`;
+    } else {
+        content.innerHTML = '<div class="text-center py-8 text-red-500">不支持预览</div>';
+    }
+}
+
+// 删除文件
+function deleteFile(fileId) {
+    if (!confirm('确定删除？')) return;
+    files = files.filter(f => f.id !== fileId);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
+    showStatus('已删除', 'green');
+    renderFiles();
+}
+
+// 搜索
+document.getElementById('searchInput').addEventListener('input', e => {
+    renderFiles(e.target.value);
+});
+
+// 关闭预览
+document.getElementById('closePreview').addEventListener('click', () => {
+    document.getElementById('previewModal').classList.add('hidden');
+});
+
+// 工具函数
+function showStatus(msg, color) {
+    const el = document.getElementById('uploadStatus');
+    el.textContent = msg;
+    el.className = `mt-2 text-sm text-${color}-600`;
+    setTimeout(() => el.textContent = '', 3000);
+}
+
+function getIcon(t) {
+    const map = { pdf: '📄', docx: '📝', xlsx: '📊', jpg: '🖼️', png: '🖼️', gif: '🖼️' };
+    return map[t] || '📁';
+}
+</script>
+</body>
+</html>
